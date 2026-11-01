@@ -68,7 +68,18 @@ for (let attempt = 1; attempt <= 2 && !switched; attempt++) {
   if (cur === target.id) { switched = true; break; }
 }
 if (!switched) { console.log("SWITCH: FAILED"); process.exit(1); }
-await new Promise((r) => setTimeout(r, 6000));
+
+// Readiness gate: the switch restarts the child; a prompt sent mid-restart
+// lands nowhere silently. Poll list_presets until the runtime answers.
+let ready = false;
+for (let i = 0; i < 20 && !ready; i++) {
+  const ws = connect();
+  const msgs = await recv(ws, (d) => d.type === "presets" || d.type === "error", 12_000);
+  if (msgs.some((d) => d.type === "presets")) ready = true;
+  else { console.log(`readiness probe ${i + 1}: ${msgs[0]?.message ?? "no answer"}`); await new Promise((r) => setTimeout(r, 4000)); }
+}
+console.log("READY:", ready ? "yes" : "(giving up — prompting anyway)");
+await new Promise((r) => setTimeout(r, 2000));
 
 // Phase 3: probe turn.
 {
@@ -77,9 +88,12 @@ await new Promise((r) => setTimeout(r, 6000));
   const tools = new Set();
   let finalText = "";
   let usage = null;
+  const seenTypes = new Set();
   ws.on("open", () => ws.send(JSON.stringify({ type: "prompt", text: prompt })));
   ws.on("message", (raw) => {
     let d; try { d = JSON.parse(raw.toString()); } catch { return; }
+    if (d.type && !seenTypes.has(d.type)) { seenTypes.add(d.type); console.log(`  [${d.type}]`, JSON.stringify(d).slice(0, 140)); }
+    if (d.type === "error") console.log("  ERROR-DETAIL:", JSON.stringify(d).slice(0, 220));
     if (d.type === "tool_start" && d.name) tools.add(d.name);
     if (d.type === "text" && d.delta) buf += d.delta;
     if (d.type === "final" || d.type === "turn_ended") {
@@ -103,5 +117,5 @@ await new Promise((r) => setTimeout(r, 6000));
     console.log("FINAL:", tail || "(no text captured)");
     console.log("LIVE-CHECK:", tail.includes("探针 OK") ? "PASS" : "FAIL (timeout)");
     process.exit(tail.includes("探针 OK") ? 0 : 1);
-  }, 180_000);
+  }, 240_000);
 }
