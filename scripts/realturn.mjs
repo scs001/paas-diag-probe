@@ -61,14 +61,16 @@ ws.on("message", (raw) => {
     const u = d.usage ?? d.message?.usage;
     if (u?.inputTokens || u?.outputTokens) usage = u;
   }
-  // Text carriers: prefer the largest accumulated text seen.
-  const candidates = [d.text, d.delta, d.block?.text, d.message?.text];
+  // Text carriers: {type:"text", delta} is an INCREMENT — accumulate it. A
+  // user-echo may ride the same channel at turn start, so the tail (last
+  // 1200 chars of the accumulated stream) is what we report.
+  if (d.type === "text" && typeof d.delta === "string") { finalText += d.delta; streamOpen = true; armIdle(); }
   if (Array.isArray(d.blocks)) {
     const texts = d.blocks.filter((b) => b?.kind === "text").map((b) => b.text ?? "").join("\n");
     if (texts.length > finalText.length) { finalText = texts; streamOpen = true; armIdle(); }
     for (const b of d.blocks) if (b?.kind === "tool" && b.name) toolCalls.add(b.name);
   }
-  for (const c of candidates) {
+  for (const c of [d.block?.text, d.message?.text]) {
     if (typeof c === "string" && c.length > finalText.length) { finalText = c; streamOpen = true; armIdle(); }
   }
   if (d.type === "turn_ended" || d.type === "turn_end" || d.type === "message_end") { settled = true; }
