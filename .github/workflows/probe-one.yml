@@ -1,0 +1,22 @@
+name: probe-one
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        required: true
+      args:
+        required: false
+        default: ""
+jobs:
+  one:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm init -y >/dev/null && npm i ws --no-audit --no-fund
+      - run: node "scripts/${{ inputs.script }}" ${{ inputs.args }}
+        env:
+          PAAS_COOKIE: ${{ secrets.PAAS_SESSION_COOKIE }}
+          DEBUG_TYPES: "1"
