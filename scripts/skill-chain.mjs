@@ -76,7 +76,7 @@ function laneWait(label, fn, attempts = 4) {
       if (i === attempts) throw new Error(`${label} exhausted`);
       const backoff = 13000 * i;
       console.log(`   backoff ${backoff}ms (lane flakiness)`);
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, Date.now() + backoff);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, backoff); // sync sleep: (arr, index, expectedValue=0, timeoutMs)
     }
   }
 }
@@ -107,7 +107,7 @@ async function evaluateWithRetry(id, label, attempts = 4) {
     console.log(`evaluate ${label} attempt ${i}:`, ev.status, JSON.stringify({ passed: ev.body?.passed, reason: String(ev.body?.reason ?? ev.body?.error ?? "").slice(0, 90) }));
     if (ev.status === 200 && passed) return ev;
     if (ev.status === 409) return ev; // terminal-state refusal: surface honestly
-    if (i < attempts) { const b = 30000 * i; console.log(`   backoff ${b}ms`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, Date.now() + b); }
+    if (i < attempts) { const b = 30000 * i; console.log(`   backoff ${b}ms`); await new Promise((r) => setTimeout(r, b)); }
   }
   return null;
 }
