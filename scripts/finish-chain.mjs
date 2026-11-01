@@ -11,9 +11,15 @@ console.log("open candidates for", PRESET, ":", cands.map((c) => `${c.id}(${c.st
 if (!cands.length) process.exit(1);
 const cand = cands[0];
 console.log("using:", cand.id, "| evidence.source:", cand.evidence?.source);
-const ev = await fetch(`${BASE}/api/persona-evolution/candidates/${cand.id}/evaluate`, { method: "POST", headers: H, body: JSON.stringify({ scenarioPrompt: "用户问：今天走查进展如何？请简短汇报。" }) }).then((r) => r.json());
-console.log("evaluate:", JSON.stringify({ passed: ev.passed, reason: (ev.reason ?? ev.error ?? "").slice(0, 80) }));
-if (ev.passed !== true) { console.log("gate not green — stopping honestly"); process.exit(2); }
+let passed = cand.status === "evaluated";
+if (!passed) {
+  const ev = await fetch(`${BASE}/api/persona-evolution/candidates/${cand.id}/evaluate`, { method: "POST", headers: H, body: JSON.stringify({ scenarioPrompt: "用户问：今天走查进展如何？请简短汇报。" }) }).then((r) => r.json());
+  passed = ev.passed === true;
+  console.log("evaluate:", JSON.stringify({ passed: ev.passed, reason: (ev.reason ?? ev.error ?? "").slice(0, 80) }));
+} else {
+  console.log("already evaluated (green) — skipping re-evaluation");
+}
+if (!passed) { console.log("gate not green — stopping honestly"); process.exit(2); }
 const pm = await fetch(`${BASE}/api/persona-evolution/candidates/${cand.id}/promote`, { method: "POST", headers: H, body: "{}" }).then((r) => r.json());
 console.log("promote:", JSON.stringify(pm).slice(0, 140));
 const post = await fetch(`${BASE}/api/agent/presets/${PRESET}`, { headers: H }).then((r) => r.json());
