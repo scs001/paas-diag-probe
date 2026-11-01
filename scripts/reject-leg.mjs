@@ -7,7 +7,7 @@ const H = { cookie, "content-type": "application/json" };
 const NAME = `lane-probe-doomed-${Date.now().toString(36).slice(-4)}`;
 const rest = (path, opts = {}) => fetch(`${BASE}${path}`, { headers: H, ...opts }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
 
-const p = await rest("/api/skill-evolution/propose", { method: "POST", body: JSON.stringify({ name: NAME, description: "驳回终结演练：验证驳回即终结。", body: "这个候选只会被驳回，用于验证驳回终结与审计路径。", evidence: { source: "owner-side probe", solved: "驳回终结路径" } }) });
+const p = await rest("/api/skill-evolution/propose", { method: "POST", body: JSON.stringify({ name: NAME, description: "驳回终结演练：验证驳回即终结。", body: "走查状态记录做法：\n1. 取基线：记录检查项的返回值与时间戳，失败时保留原始错误文本。\n2. 追加记录：每轮只追加固定四字段（时间、项、结果、备注），不改写历史行。\n3. 收尾比对：复读全部记录并输出「已恢复 / 仍异常」判定。\n（本候选仅为驳回终结演练而创建。）", evidence: { source: "owner-side probe", solved: "驳回终结路径" } }) });
 console.log("owner-side propose:", p.status, JSON.stringify(p.body).slice(0, 110));
 const cand = (await rest("/api/skill-evolution/candidates")).body?.candidates?.find((c) => c.name === NAME && c.status === "candidate");
 if (!cand) { console.log("candidate not found — stop"); process.exit(1); }
