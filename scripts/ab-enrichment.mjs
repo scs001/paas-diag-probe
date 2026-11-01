@@ -17,8 +17,22 @@ const cur = await rest("/api/preferences").then((r) => r.json());
 const before = cur.preferences?.["tool.description.enrichment"];
 console.log("PREF before:", JSON.stringify(before), "(undefined = default ON)");
 
-const run = (label) => {
-  const out = execSync(`node scripts/realturn.mjs ${JSON.stringify(PROMPT)} 240`, { env: process.env, encoding: "utf8", timeout: 260_000, cwd: process.cwd() });
+const runOnce = () => {
+  try {
+    return execSync(`node scripts/realturn.mjs ${JSON.stringify(PROMPT)} 240`, { env: process.env, encoding: "utf8", timeout: 260_000, cwd: process.cwd() });
+  } catch (e) {
+    return String(e.stdout ?? "") + String(e.stderr ?? "");
+  }
+};
+const run = async (label) => {
+  let out = "";
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    out = runOnce();
+    const hasUsage = /USAGE: \{/.test(out);
+    console.log(`-- ${label} attempt ${attempt}: usage=${hasUsage ? "yes" : "lane-down"}`);
+    if (hasUsage) break;
+    if (attempt < 5) await new Promise((r) => setTimeout(r, 90_000));
+  }
   const usage = (out.match(/USAGE: (.*)/) ?? [])[1] ?? "null";
   const final = (out.match(/FINAL: (.*)/) ?? ["", ""])[1];
   const quoted = /Creates a real GitHub issue/i.test(final);
@@ -30,13 +44,13 @@ const run = (label) => {
 };
 
 console.log("== Arm A: enrichment ON (default) ==");
-const a = run("A");
+const a = await run("A");
 
 console.log("== Flip OFF ==");
 await rest("/api/preferences", { method: "PUT", body: JSON.stringify({ key: "tool.description.enrichment", value: false }) });
 console.log("set_preset:", execSync(`node scripts/ws-one.mjs set_preset ${JSON.stringify(COMPANION)} 90`, { env: process.env, encoding: "utf8", timeout: 120_000, cwd: process.cwd() }).trim().slice(0, 100));
 console.log("== Arm B: enrichment OFF ==");
-const b = run("B");
+const b = await run("B");
 
 console.log("== Restore ON ==");
 await rest("/api/preferences", { method: "PUT", body: JSON.stringify({ key: "tool.description.enrichment", value: true }) });
