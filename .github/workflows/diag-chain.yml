@@ -1,0 +1,32 @@
+# Real-machine evidence runs (dispatch-only): persona full chain + A/B.
+name: diag-chain
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "persona-chain | ab-enrichment"
+        required: true
+        default: "persona-chain"
+      preset_id:
+        description: "disposable preset id"
+        required: false
+        default: "user.preset-3"
+
+permissions:
+  contents: read
+
+jobs:
+  chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install ws driver dependency
+        run: npm init -y && npm i ws --no-audit --no-fund
+      - name: "${{ inputs.run }}"
+        env:
+          PAAS_COOKIE: ${{ secrets.PAAS_SESSION_COOKIE }}
+        run: node "scripts/${{ inputs.run }}.mjs" "${{ inputs.preset_id }}"
