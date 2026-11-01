@@ -26,10 +26,20 @@ const prompt =
   `amendedPersona 全文用：「${AMENDED}」` +
   `evidence 的 source 写「走查回合：回复缺风险提示收尾」，fixed 写「补风险提示收尾」，boundary 写「走查场景」。` +
   `只提交候选，不要做别的。完成后把候选 id 告诉我。`;
-console.log("STEP2 real turn via WS…");
-const out = execSync(`node scripts/realturn.mjs ${JSON.stringify(prompt)} 240`, { env: process.env, encoding: "utf8", timeout: 260_000, cwd: process.cwd() });
+console.log("STEP2 real turn via WS (lane-waiting loop)…");
+let out = "";
+for (let attempt = 1; attempt <= 6; attempt++) {
+  try {
+    out = execSync(`node scripts/realturn.mjs ${JSON.stringify(prompt)} 300`, { env: process.env, encoding: "utf8", timeout: 330_000, cwd: process.cwd() });
+  } catch (e) {
+    out = String(e.stdout ?? "") + String(e.stderr ?? "");
+  }
+  console.log(`-- attempt ${attempt}: ${out.includes("persona_amend") ? "persona_amend CALLED" : "no tool call"} | ${(out.match(/USAGE: (.*)/) ?? [])[1] ?? "no usage"}`);
+  if (/persona_amend/.test(out)) break;
+  if (attempt < 6) { console.log("   lane down — waiting 120s"); await new Promise((r) => setTimeout(r, 120_000)); }
+}
+if (!/persona_amend/.test(out)) { console.log("CHAIN-FAIL: lane never opened (6 attempts / ~15min)"); process.exit(3); }
 console.log(out.trim().split("\n").map((l) => "  " + l).join("\n"));
-if (!/persona_amend/.test(out)) { console.log("CHAIN-FAIL: agent did not call persona_amend"); process.exit(1); }
 
 console.log("STEP3 poll candidate…");
 let cand = null;
