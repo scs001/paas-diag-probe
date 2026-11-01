@@ -26,10 +26,11 @@ let finalText = "";
 let settled = false;
 let streamOpen = false;
 let idleTimer = null;
+let lastActivity = Date.now();
 
 const armIdle = () => {
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if (streamOpen) settled = true; }, 6000);
+  idleTimer = setTimeout(() => { if (Date.now() - lastActivity > 12000) settled = true; }, 12000);
 };
 
 const deadline = setTimeout(() => { console.log("TIMEOUT after", maxSec, "s"); settled = true; }, maxSec * 1000);
@@ -42,6 +43,7 @@ const samples = {};
 ws.on("message", (raw) => {
   let d;
   try { d = JSON.parse(raw.toString()); } catch { return; }
+  lastActivity = Date.now();
   const t = d.type ?? "(none)";
   typeCounts[t] = (typeCounts[t] ?? 0) + 1;
   if (!samples[t]) samples[t] = JSON.stringify(d).slice(0, 160);
@@ -70,6 +72,7 @@ ws.on("message", (raw) => {
     if (typeof c === "string" && c.length > finalText.length) { finalText = c; streamOpen = true; armIdle(); }
   }
   if (d.type === "turn_ended" || d.type === "turn_end" || d.type === "message_end") { settled = true; }
+  if (d.type === "retry_scheduled") console.log(`  retry: ${d.delayMs ?? d.delay ?? "?"}ms — ${String(d.error ?? "").slice(0, 80)}`);
   if (d.usage?.inputTokens || d.usage?.outputTokens) usage = d.usage;
 });
 ws.on("error", (e) => { console.log("WS-FAIL:", String(e).slice(0, 120)); process.exit(1); });
