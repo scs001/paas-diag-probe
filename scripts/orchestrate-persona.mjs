@@ -34,11 +34,16 @@ for (let attempt = 1; attempt <= 6; attempt++) {
   } catch (e) {
     out = String(e.stdout ?? "") + String(e.stderr ?? "");
   }
-  console.log(`-- attempt ${attempt}: ${out.includes("persona_amend") ? "persona_amend CALLED" : "no tool call"} | ${(out.match(/USAGE: (.*)/) ?? [])[1] ?? "no usage"}`);
-  if (/persona_amend/.test(out)) break;
-  if (attempt < 6) { console.log("   lane down — waiting 120s"); await new Promise((r) => setTimeout(r, 120_000)); }
+  const toolLine = (out.match(/TOOL_CALLS: (.*)/) ?? [])[1] ?? "";
+  const finalLine = (out.match(/FINAL: (.*)/) ?? ["", ""])[1] ?? "";
+  const called = /(^|,)persona_amend(,|$)/.test(toolLine);
+  console.log(`-- attempt ${attempt}: tools=[${toolLine}] called=${called} | ${(out.match(/USAGE: (.*)/) ?? [])[1] ?? "no usage"}`);
+  if (finalLine) console.log(`   FINAL: ${finalLine.slice(0, 260)}`);
+  if (called) break;
+  if (attempt < 6) { console.log("   waiting 90s"); await new Promise((r) => setTimeout(r, 90_000)); }
 }
-if (!/persona_amend/.test(out)) { console.log("CHAIN-FAIL: lane never opened (6 attempts / ~15min)"); process.exit(3); }
+const toolLine2 = (out.match(/TOOL_CALLS: (.*)/) ?? [])[1] ?? "";
+if (!/(^|,)persona_amend(,|$)/.test(toolLine2)) { console.log("CHAIN-FAIL: persona_amend never called (see FINAL above — tool face / agent judgement)"); process.exit(3); }
 console.log(out.trim().split("\n").map((l) => "  " + l).join("\n"));
 
 console.log("STEP3 poll candidate…");
