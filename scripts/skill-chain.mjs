@@ -23,6 +23,47 @@ function turn(prompt, maxSec = 240) {
   return execSync(`node scripts/realturn.mjs ${JSON.stringify(prompt)} ${maxSec}`, { env: process.env, encoding: "utf8", timeout: (maxSec + 30) * 1000, cwd: process.cwd() });
 }
 
+// ── Leg 0: switch the runtime to standard (full surface). The persona chain
+// left the session on user-preset-3 — a CUSTOM preset runs in focused mode
+// (tools = preset-declared resources only), where skill_propose is honestly
+// refused. Same-connection set_preset with id-matching ack (live-check's
+// proven pattern), then a readiness gate.
+import WebSocket from "ws";
+function wsConnect() { return new WebSocket(BASE.replace(/^http/, "ws") + "/ws", { headers: { cookie } }); }
+async function switchToStandard() {
+  const target = "standard";
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const got = await new Promise((resolve) => {
+      const ws = wsConnect();
+      let done = false;
+      const fin = (v) => { if (!done) { done = true; try { ws.close(); } catch {} resolve(v); } };
+      ws.on("open", () => ws.send(JSON.stringify({ type: "set_preset", id: target })));
+      ws.on("message", (raw) => {
+        let d; try { d = JSON.parse(raw.toString()); } catch { return; }
+        if (d.type === "current_preset" && d.id === target) fin({ ok: true });
+        else if (d.type === "error") fin({ ok: false, err: d.message });
+      });
+      ws.on("error", () => fin({ ok: false, err: "drop" }));
+      setTimeout(() => fin({ ok: false, err: "timeout" }), 45_000);
+    });
+    console.log(`set_preset standard attempt ${attempt}:`, got.ok ? "confirmed" : `(${got.err})`);
+    if (got.ok) break;
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  for (let i = 0; i < 20; i++) {
+    const ws = wsConnect();
+    const msgs = await new Promise((resolve) => {
+      const out = []; const fin = (v) => { try { ws.close(); } catch {} resolve(v); };
+      ws.on("message", (raw) => { let d; try { d = JSON.parse(raw.toString()); } catch { return; } if (d.type === "current_preset") out.push(d); if (out.length) fin(out); });
+      setTimeout(() => fin(out), 12_000); ws.on("error", () => fin(out));
+    });
+    if (msgs[0]?.id === target) { console.log("READY: standard live"); return; }
+    await new Promise((r) => setTimeout(r, 4000));
+  }
+  throw new Error("runtime never settled on standard");
+}
+await switchToStandard();
+
 function laneWait(label, fn, attempts = 4) {
   for (let i = 1; i <= attempts; i++) {
     try {
