@@ -26,7 +26,13 @@ jobs:
           node-version: 22
       - name: Install ws driver dependency
         run: npm init -y && npm i ws --no-audit --no-fund
-      - name: "${{ inputs.run }}"
+      - name: persona full chain
+        if: inputs.run == 'persona-chain'
         env:
           PAAS_COOKIE: ${{ secrets.PAAS_SESSION_COOKIE }}
-        run: node "scripts/${{ inputs.run }}.mjs" "${{ inputs.preset_id }}"
+        run: node scripts/orchestrate-persona.mjs "${{ inputs.preset_id }}"
+      - name: enrichment A/B
+        if: inputs.run == 'ab-enrichment'
+        env:
+          PAAS_COOKIE: ${{ secrets.PAAS_SESSION_COOKIE }}
+        run: node scripts/ab-enrichment.mjs "${{ inputs.preset_id }}"
