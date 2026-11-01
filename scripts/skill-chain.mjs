@@ -81,27 +81,36 @@ function laneWait(label, fn, attempts = 4) {
   }
 }
 
-// ── Leg 1: propose v1 via a real turn ──
+// ── Leg 1: propose v1 via a real turn (idempotent: reuse an existing open
+// candidate of the same name instead of burning another lane turn) ──
 console.log("== Leg 1: real turn → skill_propose (v1) ==");
-const t1 = laneWait("turn1", () => turn(
-  `用 skill_propose 工具提交一个技能候选：名字 ${V1}，描述一句话说明它是什么；正文给出三步以内可执行的做法；证据 evidence.source 写「本轮真实任务」，evidence.solved 写「车道探针走查中的状态记录」，evidence.boundary 写「仅适用于车道探针走查场景」。提交后告诉我候选 id。`));
-console.log(t1.trim().split("\n").map((l) => "  " + l).join("\n"));
-
-const cl1 = await rest("/api/skill-evolution/candidates");
-const rows1 = cl1.body?.candidates ?? [];
-const cand1 = rows1.filter((c) => c.name === V1).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+const pre = await rest("/api/skill-evolution/candidates");
+let cand1 = (pre.body?.candidates ?? []).filter((c) => c.name === V1 && (c.status === "candidate" || c.status === "evaluated"))
+  .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+if (!cand1) {
+  const t1 = laneWait("turn1", () => turn(
+    `用 skill_propose 工具提交一个技能候选：名字 ${V1}，描述一句话说明它是什么；正文给出三步以内可执行的做法；证据 evidence.source 写「本轮真实任务」，evidence.solved 写「车道探针走查中的状态记录」，evidence.boundary 写「仅适用于车道探针走查场景」。提交后告诉我候选 id。`));
+  console.log(t1.trim().split("\n").map((l) => "  " + l).join("\n"));
+  const cl1 = await rest("/api/skill-evolution/candidates");
+  cand1 = (cl1.body?.candidates ?? []).filter((c) => c.name === V1).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+} else console.log("(reusing existing candidate — no new turn)");
 console.log("candidate v1:", cand1 ? `${cand1.id} status=${cand1.status} evidence=${JSON.stringify(cand1.evidence).slice(0, 120)}` : "NOT FOUND");
 if (!cand1) process.exit(1);
 
-// ── Leg 2: evaluate (judge lane) ──
+// ── Leg 2: evaluate (judge lane) — the route requires scenarioPrompt: the
+// evidence scene the candidate claims to help (contract: evidence.scenario
+// fallback exists but the tool schema doesn't carry it, so the caller supplies).
+const SCENARIO = "车道探针走查走查员需要记录每轮检查的基线状态与恢复判定，供下一轮走查接续比对。请生成这样一份走查状态记录。";
 console.log("== Leg 2: evaluate v1 (judge lane) ==");
-const ev1 = await rest(`/api/skill-evolution/candidates/${cand1.id}/evaluate`, { method: "POST" });
+const ev1 = await rest(`/api/skill-evolution/candidates/${cand1.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
 console.log("evaluate v1:", ev1.status, JSON.stringify({ passed: ev1.body?.passed, reason: String(ev1.body?.reason ?? ev1.body?.error ?? "").slice(0, 100) }));
 if (!ev1.body?.passed) { console.log("gate not green — stopping honestly"); process.exit(2); }
 
-// ── Leg 3: promote (human key) ──
-const pr1 = await rest(`/api/skill-evolution/candidates/${cand1.id}/promote`, { method: "POST" });
-console.log("promote v1:", pr1.status, JSON.stringify(pr1.body).slice(0, 120));
+// ── Leg 3: promote (human key; skip if already promoted on a resume) ──
+if (cand1.status !== "promoted") {
+  const pr1 = await rest(`/api/skill-evolution/candidates/${cand1.id}/promote`, { method: "POST" });
+  console.log("promote v1:", pr1.status, JSON.stringify(pr1.body).slice(0, 120));
+} else console.log("(v1 already promoted — resume)");
 
 // ── Leg 4: next turn sees the new skill ──
 console.log("== Leg 4: new-cast turn must see the promoted skill ==");
@@ -119,7 +128,7 @@ const cl2 = await rest("/api/skill-evolution/candidates");
 const cand2 = (cl2.body?.candidates ?? []).filter((c) => c.name === V2).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
 console.log("candidate v2:", cand2 ? `${cand2.id} status=${cand2.status} supersedes=${cand2.supersedes}` : "NOT FOUND");
 if (!cand2) process.exit(1);
-const ev2 = await rest(`/api/skill-evolution/candidates/${cand2.id}/evaluate`, { method: "POST" });
+const ev2 = await rest(`/api/skill-evolution/candidates/${cand2.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
 console.log("evaluate v2:", ev2.status, JSON.stringify({ passed: ev2.body?.passed, reason: String(ev2.body?.reason ?? ev2.body?.error ?? "").slice(0, 100) }));
 if (!ev2.body?.passed) { console.log("gate not green — stopping honestly"); process.exit(2); }
 const pr2 = await rest(`/api/skill-evolution/candidates/${cand2.id}/promote`, { method: "POST" });
