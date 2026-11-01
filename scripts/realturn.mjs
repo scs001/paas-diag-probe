@@ -37,27 +37,39 @@ const deadline = setTimeout(() => { console.log("TIMEOUT after", maxSec, "s"); s
 ws.on("open", () => {
   ws.send(JSON.stringify({ type: "prompt", text }));
 });
+const typeCounts = {};
+const samples = {};
 ws.on("message", (raw) => {
   let d;
   try { d = JSON.parse(raw.toString()); } catch { return; }
+  const t = d.type ?? "(none)";
+  typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+  if (!samples[t]) samples[t] = JSON.stringify(d).slice(0, 160);
+  if (process.env.DEBUG_TYPES) {
+    if (typeCounts[t] <= 2) console.log(`  [${t}]`, samples[t]);
+  }
   if (d.type === "error") { console.log("WS-ERROR:", String(d.message).slice(0, 140)); }
-  if (d.type === "tool_start" || d.type === "tool_call") toolCalls.add(d.name ?? d.toolName ?? "?");
-  if (d.type === "tool" && d.name) toolCalls.add(d.name);
-  if (d.type === "block" && d.block?.kind === "tool") toolCalls.add(d.block.name);
-  if (d.type === "message_end" || d.type === "assistant_message") {
-    if (d.usage) usage = d.usage;
-    if (d.message?.usage) usage = d.message.usage;
+  // Tool calls: any event carrying a tool name.
+  const name = d.name ?? d.toolName ?? d.block?.name ?? d.tool?.name;
+  const isTool = d.type === "tool_start" || d.type === "tool_call" || d.type === "tool"
+    || (d.type === "block" && d.block?.kind === "tool") || (d.type === "block_delta" && d.block?.kind === "tool")
+    || (d.type === "blocks" && Array.isArray(d.blocks));
+  if (isTool && typeof name === "string" && name) toolCalls.add(name);
+  if (d.type === "message_end" || d.type === "assistant_message" || d.type === "turn_usage") {
+    const u = d.usage ?? d.message?.usage;
+    if (u?.inputTokens || u?.outputTokens) usage = u;
   }
-  // Streaming text: keep the latest assistant text tail.
-  if ((d.type === "text_delta" || d.type === "text") && typeof d.text === "string") { finalText = d.text; streamOpen = true; armIdle(); }
-  if (d.type === "assistant" && typeof d.text === "string") { finalText = d.text; streamOpen = true; armIdle(); }
-  if (d.type === "block_delta" && d.block?.kind === "text") { finalText = d.block.text ?? finalText; streamOpen = true; armIdle(); }
-  if (d.type === "blocks" && Array.isArray(d.blocks)) {
-    const texts = d.blocks.filter((b) => b.kind === "text").map((b) => b.text ?? "");
-    if (texts.length) { finalText = texts.join("\n"); }
-    for (const b of d.blocks) if (b.kind === "tool") toolCalls.add(b.name);
+  // Text carriers: prefer the largest accumulated text seen.
+  const candidates = [d.text, d.delta, d.block?.text, d.message?.text];
+  if (Array.isArray(d.blocks)) {
+    const texts = d.blocks.filter((b) => b?.kind === "text").map((b) => b.text ?? "").join("\n");
+    if (texts.length > finalText.length) { finalText = texts; streamOpen = true; armIdle(); }
+    for (const b of d.blocks) if (b?.kind === "tool" && b.name) toolCalls.add(b.name);
   }
-  if (d.type === "turn_ended" || d.type === "turn_end") { settled = true; }
+  for (const c of candidates) {
+    if (typeof c === "string" && c.length > finalText.length) { finalText = c; streamOpen = true; armIdle(); }
+  }
+  if (d.type === "turn_ended" || d.type === "turn_end" || d.type === "message_end") { settled = true; }
   if (d.usage?.inputTokens || d.usage?.outputTokens) usage = d.usage;
 });
 ws.on("error", (e) => { console.log("WS-FAIL:", String(e).slice(0, 120)); process.exit(1); });
@@ -71,5 +83,6 @@ try { ws.close(); } catch {}
 
 console.log("TOOL_CALLS:", [...toolCalls].join(",") || "(none)");
 console.log("USAGE:", JSON.stringify(usage));
+if (process.env.DEBUG_TYPES) console.log("TYPES:", JSON.stringify(typeCounts));
 console.log("FINAL:", finalText.replace(/\s+/g, " ").slice(-300));
 process.exit(finalText || toolCalls.size ? 0 : 1);
