@@ -27,8 +27,13 @@ const p = await rest("/api/skill-evolution/propose", { method: "POST", body: JSO
 console.log("propose:", p.status, p.body?.candidate?.id ?? JSON.stringify(p.body).slice(0, 80));
 if (p.status !== 201) process.exit(1);
 const cand = (await rest("/api/skill-evolution/candidates")).body?.candidates?.find((c) => c.name === N);
-const ev = await rest(`/api/skill-evolution/candidates/${cand.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
-console.log("evaluate:", ev.status, JSON.stringify({ passed: ev.body?.passed, reason: String(ev.body?.reason ?? "").slice(0, 80) }));
+let ev = null;
+for (let i = 1; i <= 5; i++) {
+  ev = await rest(`/api/skill-evolution/candidates/${cand.id}/evaluate`, { method: "POST", body: JSON.stringify({ scenarioPrompt: SCENARIO }) });
+  console.log(`evaluate attempt ${i}:`, ev.status, JSON.stringify({ passed: ev.body?.passed, reason: String(ev.body?.reason ?? "").slice(0, 80) }));
+  if (ev.status === 200) break;
+  if (i < 5) await new Promise((r) => setTimeout(r, 25000 * i));
+}
 if (!(ev.status === 200 && ev.body?.passed)) process.exit(2);
 const pr = await rest(`/api/skill-evolution/candidates/${cand.id}/promote`, { method: "POST" });
 console.log("promote:", pr.status, JSON.stringify(pr.body).slice(0, 90));
